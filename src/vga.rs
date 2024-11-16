@@ -22,15 +22,15 @@ pub fn clear_screen(width: u16, height: u16) {
     }
 }
 
-pub fn print_buffer(buffer: &mut [[u8; COLS]; ROWS]) {
+pub fn print_buffer(buffer: *mut [[u8; COLS]; ROWS]) {
     let width = COLS;
     unsafe {
         for row in 0..ROWS {
             for col in 0..COLS {
-                if buffer[row][col] != 0 {
+                if (*buffer)[row][col] != 0 {
                     let vga_buffer = 0xb8000 as *mut u8;
                     *vga_buffer.offset((row as isize * width as isize + col as isize) * 2) =
-                        buffer[row][col];
+                        (*buffer)[row][col];
                     *vga_buffer.offset((row as isize * width as isize + col as isize) * 2 + 1) =
                         0x07;
                 }

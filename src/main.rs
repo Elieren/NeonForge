@@ -9,7 +9,7 @@ mod eng;
 mod vga;
 
 use crate::eng::SCANCODE_MAP;
-use constants::{COLS, MAX_LINES, MSG, ROWS};
+use constants::{COLS, CURRENT_COL, CURRENT_ROW, MAX_LINES, MSG, ROWS};
 
 static ASCII_LOGO: &[u8] = b"
     ____  ____  _____
@@ -20,8 +20,6 @@ static ASCII_LOGO: &[u8] = b"
 ";
 
 static mut BUFFER: [[u8; COLS]; ROWS] = [[0; COLS]; ROWS];
-static mut CURRENT_ROW: usize = 0;
-static mut CURRENT_COL: usize = 0;
 static mut CURSOR_POSITION_ROW: usize = 0;
 static mut CURSOR_POSITION_COL: usize = 0;
 
@@ -130,7 +128,7 @@ fn print_prompt(row: usize, col: usize) -> usize {
             BUFFER[row][col + i] = byte;
         }
 
-        vga::print_buffer(&mut BUFFER);
+        vga::print_buffer(&raw mut BUFFER);
 
         return col + msg.len();
     }
@@ -170,8 +168,12 @@ fn print_key(key: u8, width: u16, height: u16) {
         } else if let Some(character) = SCANCODE_MAP[key as usize] {
             if character == '\n' {
                 // Выполнение команды и отображение текущей строки
-                commands::command_fn(&mut BUFFER, CURRENT_ROW);
-                CURRENT_ROW += 2;
+                let stat: bool = commands::command_fn(&raw mut BUFFER, CURRENT_ROW);
+                if !stat {
+                    CURRENT_ROW += 2;
+                } else {
+                    CURRENT_ROW = 0;
+                }
                 CURRENT_COL = 0;
 
                 // Печать приглашения
@@ -196,7 +198,7 @@ fn print_key(key: u8, width: u16, height: u16) {
         vga::clear_screen(width, height);
 
         // Печать буфера на экране
-        vga::print_buffer(&mut BUFFER);
+        vga::print_buffer(&raw mut BUFFER);
 
         // Отображение курсора на текущей позиции
         let cursor_row = CURSOR_POSITION_ROW;

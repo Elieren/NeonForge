@@ -1,119 +1,105 @@
-use crate::constants::{COLS, ROWS};
-use crate::delay;
-use crate::eng::SCANCODE_MAP;
-use crate::vga::write_char;
+pub fn command_fn(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
+    unsafe {
+        let command: &[u8] = &(*buffer)[row][3..];
 
-struct SimpleString {
-    buffer: [u8; 128],
-    length: usize,
-}
-
-impl SimpleString {
-    fn new() -> Self {
-        SimpleString {
-            buffer: [0; 128],
-            length: 0,
-        }
-    }
-
-    fn push_str(&mut self, s: &str) {
-        let bytes = s.as_bytes();
-        let len = bytes.len();
-        if self.length + len <= self.buffer.len() {
-            self.buffer[self.length..self.length + len].copy_from_slice(bytes);
-            self.length += len;
-        }
-    }
-
-    fn push_char(&mut self, c: char) {
-        let mut char_buffer = [0; 4];
-        let char_str = c.encode_utf8(&mut char_buffer);
-        self.push_str(char_str);
-    }
-
-    fn as_str(&self) -> &str {
-        core::str::from_utf8(&self.buffer[..self.length]).unwrap()
-    }
-
-    fn len(&self) -> usize {
-        self.length
-    }
-}
-
-fn bytes_to_significant_str(buffer: &[[u8; COLS]; ROWS], row: usize, start: usize) -> SimpleString {
-    let mut result = SimpleString::new();
-
-    // Идем по строке буфера от начала до конца
-    for &byte in &buffer[row][start..] {
-        // Проверяем, что байт не ноль и что символ уникальный
-        if byte != 0 {
-            // Логика SCANCODE_MAP для преобразования байта в символ
-            if let Some(character) = SCANCODE_MAP[byte as usize] {
-                // Добавляем символ в результат
-                result.push_char(character);
-
-                // Лог добавления символа
-                write_char(20, result.len(), character as u8, 0x07);
+        let mut b = 0;
+        for i in command.iter() {
+            if *i != b'\0' {
+                b += 1;
             }
         }
+
+        b += 3;
+        let comm: &[u8] = &(*buffer)[row][3..b];
+
+        let commands: [Command; 5] = [
+            Command::new("hello", hello_action),
+            Command::new("error", error_action),
+            Command::new("reboot", reboot_action),
+            Command::new("shutdown", shutdown_action),
+            Command::new("clear", clear),
+        ];
+
+        for cmd in commands.iter() {
+            if comm == cmd.name.as_bytes() {
+                let result = (cmd.action)(buffer, row);
+                if result {
+                    return true;
+                }
+                return false; // Завершите цикл, если команда найдена, но не вернула true
+            }
+        }
+
+        error_action(buffer, row);
+        false // Возвращаем false, если команда не найдена
     }
-
-    // Лог для длины строки после обработки
-    write_char(20, 10, b'L', 0x07);
-    write_char(20, 11, b'N', 0x07);
-    write_char(20, 12, b':', 0x07);
-    write_char(20, 13, b' ', 0x07);
-    write_char(20, 14, b'0' + (result.len() / 10) as u8, 0x07);
-    write_char(20, 15, b'0' + (result.len() % 10) as u8, 0x07);
-
-    result
 }
 
-pub fn command_fn(buffer: &mut [[u8; COLS]; ROWS], row: usize) {
-    let command_str = bytes_to_significant_str(buffer, row, 3);
-
-    // Выводим строку команды для проверки
-    write_char(row + 2, 0, b'L', 0x07);
-    for (i, &byte) in command_str.as_str().as_bytes().iter().enumerate() {
-        write_char(row + 2, i + 1, byte, 0x07);
-    }
-    write_char(row + 3, 0, b'E', 0x07);
-    delay(20000000);
-
-    // Выводим длину строки команды
-    let cmd_len = command_str.len();
-    write_char(row + 6, 0, b'L', 0x07);
-    write_char(row + 6, 1, b'N', 0x07);
-    write_char(row + 6, 2, b':', 0x07);
-    write_char(row + 6, 3, b' ', 0x07);
-    write_char(row + 6, 4, b'0' + (cmd_len / 10) as u8, 0x07);
-    write_char(row + 6, 5, b'0' + (cmd_len % 10) as u8, 0x07);
-    delay(20000000);
-
-    // Лог состояния буфера
-    for (i, &byte) in buffer[row].iter().enumerate() {
-        write_char(21, i * 2, byte, 0x07);
-        if byte == 0 {
-            write_char(21, i * 2 + 1, b'0', 0x07);
-        } else {
-            write_char(21, i * 2 + 1, byte, 0x07);
-        }
-    }
-    delay(20000000);
-
-    if command_str.as_str() == "hello" {
-        write_char(row + 3, 2, b'X', 0x07); // Лог успешного сравнения
-        let msg = b"Hello!";
+fn hello_action(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
+    unsafe {
+        let msg = b"HELLO!";
         for (i, &byte) in msg.iter().enumerate() {
-            write_char(row + 4, i, byte, 0x07);
-            buffer[row + 4][i] = byte;
-            delay(100000);
+            write_char(row + 1, i, byte, 0x07); // Печатает на строке row + 1
+            (*buffer)[row + 1][i] = byte; // Записываем в буфер
         }
-    } else {
-        // Лог неуспешного сравнения
-        write_char(row + 3, 2, b'F', 0x07);
-        for (i, &byte) in b"failed".iter().enumerate() {
-            write_char(row + 4, i, byte, 0x07);
+        false
+    }
+}
+
+fn error_action(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
+    unsafe {
+        let msg = b"Error: command";
+        for (i, &byte) in msg.iter().enumerate() {
+            write_char(row + 1, i, byte, 0x07); // Печатает на строке row + 1
+            (*buffer)[row + 1][i] = byte; // Записываем в буфер
         }
+        false
+    }
+}
+
+fn reboot_action(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
+    unsafe {
+        let msg = b"Rebooting...";
+        for (i, &byte) in msg.iter().enumerate() {
+            write_char(row + 1, i, byte, 0x07); // Печатает на строке row + 1
+            (*buffer)[row + 1][i] = byte; // Записываем в буфер
+        }
+
+        asm!(
+            "cli",            // Отключаем прерывания
+            "out 0x64, al",   // Отправляем команду на контроллер клавиатуры
+            "2: hlt",         // Метка 2: останавливаем процессор
+            "jmp 2b",         // Переход к метке 2, чтобы создать бесконечный цикл
+            in("al") 0xFEu8   // Значение 0xFE для команды перезагрузки
+        );
+        false
+    }
+}
+
+fn shutdown_action(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
+    unsafe {
+        let msg = b"Shutting down...";
+        for (i, &byte) in msg.iter().enumerate() {
+            write_char(row + 1, i, byte, 0x07); // Печатает на строке row + 1
+            (*buffer)[row + 1][i] = byte; // Записываем в буфер
+        }
+
+        asm!(
+            "cli",            // Отключаем прерывания
+            "mov ax, 0x5301", // Подключаемся к APM API
+            "xor bx, bx",
+            "int 0x15",
+            "mov ax, 0x530E", // Устанавливаем версию APM на 1.2
+            "xor bx, bx",
+            "mov cx, 0x0102",
+            "int 0x15",
+            "mov ax, 0x5307", // Выключаем систему
+            "mov bx, 0x0001",
+            "mov cx, 0x0003",
+            "int 0x15",
+            "hlt", // Останавливаем процессор
+            options(noreturn, nostack)
+        );
+        false
     }
 }

@@ -1,42 +1,48 @@
 use crate::constants::{COLS, ROWS};
-use crate::vga::write_char;
+use crate::vga::{clear_screen, write_char};
 use core::arch::asm;
 
 struct Command<'a> {
     name: &'a str,
-    action: fn(&mut [[u8; COLS]; ROWS], usize),
+    action: fn(*mut [[u8; COLS]; ROWS], usize) -> bool,
 }
 
 impl<'a> Command<'a> {
-    fn new(name: &'a str, action: fn(&mut [[u8; COLS]; ROWS], usize)) -> Self {
+    fn new(name: &'a str, action: fn(*mut [[u8; COLS]; ROWS], usize) -> bool) -> Self {
         Command { name, action }
     }
 }
 
-fn hello_action(buffer: &mut [[u8; COLS]; ROWS], row: usize) {
-    let msg = b"HELLO!";
-    for (i, &byte) in msg.iter().enumerate() {
-        write_char(row + 1, i, byte, 0x07); // Печатает на строке row + 1
-        buffer[row + 1][i] = byte; // Записываем в буфер
-    }
-}
-
-fn error_action(buffer: &mut [[u8; COLS]; ROWS], row: usize) {
-    let msg = b"Error: command";
-    for (i, &byte) in msg.iter().enumerate() {
-        write_char(row + 1, i, byte, 0x07); // Печатает на строке row + 1
-        buffer[row + 1][i] = byte; // Записываем в буфер
-    }
-}
-
-fn reboot_action(buffer: &mut [[u8; COLS]; ROWS], row: usize) {
-    let msg = b"Rebooting...";
-    for (i, &byte) in msg.iter().enumerate() {
-        write_char(row + 1, i, byte, 0x07); // Печатает на строке row + 1
-        buffer[row + 1][i] = byte; // Записываем в буфер
-    }
-
+fn hello_action(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
     unsafe {
+        let msg = b"HELLO!";
+        for (i, &byte) in msg.iter().enumerate() {
+            write_char(row + 1, i, byte, 0x07); // Печатает на строке row + 1
+            (*buffer)[row + 1][i] = byte; // Записываем в буфер
+        }
+        false
+    }
+}
+
+fn error_action(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
+    unsafe {
+        let msg = b"Error: command";
+        for (i, &byte) in msg.iter().enumerate() {
+            write_char(row + 1, i, byte, 0x07); // Печатает на строке row + 1
+            (*buffer)[row + 1][i] = byte; // Записываем в буфер
+        }
+        false
+    }
+}
+
+fn reboot_action(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
+    unsafe {
+        let msg = b"Rebooting...";
+        for (i, &byte) in msg.iter().enumerate() {
+            write_char(row + 1, i, byte, 0x07); // Печатает на строке row + 1
+            (*buffer)[row + 1][i] = byte; // Записываем в буфер
+        }
+
         asm!(
             "cli",            // Отключаем прерывания
             "out 0x64, al",   // Отправляем команду на контроллер клавиатуры
@@ -44,17 +50,18 @@ fn reboot_action(buffer: &mut [[u8; COLS]; ROWS], row: usize) {
             "jmp 2b",         // Переход к метке 2, чтобы создать бесконечный цикл
             in("al") 0xFEu8   // Значение 0xFE для команды перезагрузки
         );
+        false
     }
 }
 
-fn shutdown_action(buffer: &mut [[u8; COLS]; ROWS], row: usize) {
-    let msg = b"Shutting down...";
-    for (i, &byte) in msg.iter().enumerate() {
-        write_char(row + 1, i, byte, 0x07); // Печатает на строке row + 1
-        buffer[row + 1][i] = byte; // Записываем в буфер
-    }
-
+fn shutdown_action(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
     unsafe {
+        let msg = b"Shutting down...";
+        for (i, &byte) in msg.iter().enumerate() {
+            write_char(row + 1, i, byte, 0x07); // Печатает на строке row + 1
+            (*buffer)[row + 1][i] = byte; // Записываем в буфер
+        }
+
         asm!(
             "cli",            // Отключаем прерывания
             "mov ax, 0x5301", // Подключаемся к APM API
@@ -74,36 +81,55 @@ fn shutdown_action(buffer: &mut [[u8; COLS]; ROWS], row: usize) {
     }
 }
 
-pub fn command_fn(buffer: &mut [[u8; COLS]; ROWS], row: usize) {
-    let command: &[u8] = &buffer[row][3..];
+fn clear(buffer: *mut [[u8; COLS]; ROWS], _: usize) -> bool {
+    let screen_width = 80;
+    let screen_height = 25;
+    clear_screen(screen_width, screen_height);
 
-    let mut b = 0;
-    for i in command.iter() {
-        if *i != ('\0' as u8) {
-            b += 1;
+    unsafe {
+        for row in (*buffer).iter_mut() {
+            for cell in row.iter_mut() {
+                *cell = 0;
+            }
         }
     }
 
-    b += 3;
-    let comm: &[u8] = &buffer[row][3..b];
+    true // Возвращаем true
+}
 
-    let commands: [Command; 4] = [
-        Command::new("hello", hello_action),
-        Command::new("error", error_action),
-        Command::new("reboot", reboot_action),
-        Command::new("shutdown", shutdown_action),
-    ];
+pub fn command_fn(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
+    unsafe {
+        let command: &[u8] = &(*buffer)[row][3..];
 
-    let mut found = false;
-    for cmd in commands.iter() {
-        if comm == cmd.name.as_bytes() {
-            (cmd.action)(buffer, row);
-            found = true;
-            break;
+        let mut b = 0;
+        for i in command.iter() {
+            if *i != b'\0' {
+                b += 1;
+            }
         }
-    }
 
-    if !found {
+        b += 3;
+        let comm: &[u8] = &(*buffer)[row][3..b];
+
+        let commands: [Command; 5] = [
+            Command::new("hello", hello_action),
+            Command::new("error", error_action),
+            Command::new("reboot", reboot_action),
+            Command::new("shutdown", shutdown_action),
+            Command::new("clear", clear),
+        ];
+
+        for cmd in commands.iter() {
+            if comm == cmd.name.as_bytes() {
+                let result = (cmd.action)(buffer, row);
+                if result {
+                    return true;
+                }
+                return false; // Завершите цикл, если команда найдена, но не вернула true
+            }
+        }
+
         error_action(buffer, row);
+        false // Возвращаем false, если команда не найдена
     }
 }
