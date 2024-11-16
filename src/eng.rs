@@ -38,5 +38,7 @@ pub const SCANCODE_MAP: [Option<char>; 256] = {
     map[0x2C] = Some('z');
     map[0x39] = Some(' ');
     map[0x1C] = Some('\n');
+    map[0x0C] = Some('_');
+    map[0x27] = Some(':');
     map
 };

@@ -1,4 +1,5 @@
 use crate::constants::{COLS, ROWS};
+use crate::time::{get_time, set_time};
 use crate::vga::{clear_screen, write_char};
 use core::arch::asm;
 
@@ -16,6 +17,59 @@ impl<'a> Command<'a> {
 fn hello_action(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
     unsafe {
         let msg = b"HELLO!";
+        for (i, &byte) in msg.iter().enumerate() {
+            write_char(row + 1, i, byte, 0x07); // Печатает на строке row + 1
+            (*buffer)[row + 1][i] = byte; // Записываем в буфер
+        }
+        false
+    }
+}
+
+fn time_action(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
+    unsafe {
+        let time = get_time();
+        let mut time_str = [0u8; 8];
+
+        // Заполняем строку времени
+        time_str[0] = b'0' + (time.hours / 10) % 10;
+        time_str[1] = b'0' + time.hours % 10;
+        time_str[2] = b':';
+        time_str[3] = b'0' + (time.minutes / 10) % 10;
+        time_str[4] = b'0' + time.minutes % 10;
+        time_str[5] = b':';
+        time_str[6] = b'0' + (time.seconds / 10) % 10;
+        time_str[7] = b'0' + time.seconds % 10;
+
+        for (i, &byte) in time_str.iter().enumerate() {
+            write_char(row + 1, i, byte, 0x07); // Печатает на строке row + 1
+            (*buffer)[row + 1][i] = byte; // Записываем в буфер
+        }
+        false
+    }
+}
+
+fn time_add_action(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
+    unsafe {
+        let command: &[u8] = &(*buffer)[row][8..]; // Извлекаем аргументы после `time_add`
+        let mut parts = command.split(|&byte| byte == b':');
+
+        if let (Some(h), Some(m), Some(s)) = (parts.next(), parts.next(), parts.next()) {
+            if let (Ok(hours), Ok(minutes), Ok(seconds)) = (
+                core::str::from_utf8(h).unwrap_or("").parse::<u8>(),
+                core::str::from_utf8(m).unwrap_or("").parse::<u8>(),
+                core::str::from_utf8(s).unwrap_or("").parse::<u8>(),
+            ) {
+                set_time(hours, minutes, seconds);
+                let msg = b"Time set!";
+                for (i, &byte) in msg.iter().enumerate() {
+                    write_char(row + 1, i, byte, 0x07); // Печатает на строке row + 1
+                    (*buffer)[row + 1][i] = byte; // Записываем в буфер
+                }
+                return false;
+            }
+        }
+
+        let msg = b"Invalid time format!";
         for (i, &byte) in msg.iter().enumerate() {
             write_char(row + 1, i, byte, 0x07); // Печатает на строке row + 1
             (*buffer)[row + 1][i] = byte; // Записываем в буфер
@@ -111,8 +165,10 @@ pub fn command_fn(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
         b += 3;
         let comm: &[u8] = &(*buffer)[row][3..b];
 
-        let commands: [Command; 5] = [
+        let commands: [Command; 7] = [
             Command::new("hello", hello_action),
+            Command::new("time", time_action),
+            Command::new("time_add", time_add_action),
             Command::new("error", error_action),
             Command::new("reboot", reboot_action),
             Command::new("shutdown", shutdown_action),
@@ -120,7 +176,7 @@ pub fn command_fn(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
         ];
 
         for cmd in commands.iter() {
-            if comm == cmd.name.as_bytes() {
+            if comm.starts_with(cmd.name.as_bytes()) {
                 let result = (cmd.action)(buffer, row);
                 if result {
                     return true;

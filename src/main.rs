@@ -1,15 +1,18 @@
 #![no_std]
 #![no_main]
+#![feature(abi_x86_interrupt)]
 
 use core::panic::PanicInfo;
 use x86_64::instructions::port::Port;
 mod commands;
 mod constants;
 mod eng;
+mod time;
 mod vga;
 
 use crate::eng::SCANCODE_MAP;
 use constants::{COLS, CURRENT_COL, CURRENT_ROW, MAX_LINES, MSG, ROWS};
+use time::{enable_interrupts, init_idt, init_pit, set_time};
 
 static ASCII_LOGO: &[u8] = b"
     ____  ____  _____
@@ -25,6 +28,12 @@ static mut CURSOR_POSITION_COL: usize = 0;
 
 #[no_mangle]
 pub extern "C" fn _start() -> ! {
+    init_idt();
+    init_pit();
+    enable_interrupts();
+
+    set_time(12, 0, 0); // Установка начального времени
+
     unsafe {
         let screen_width = 80;
         let screen_height = 25;
