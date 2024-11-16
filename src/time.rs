@@ -97,7 +97,8 @@ pub fn init_idt() {
     unsafe {
         IDT[InterruptIndex::Timer.as_usize()].set_handler_fn(pit_interrupt_handler);
         IDT[InterruptIndex::Keyboard.as_usize()].set_handler_fn(keyboard_interrupt_handler);
-        IDT.load();
+        let idt = &raw mut IDT;
+        idt.as_ref().expect("IDT is None").load();
         PICS.lock().initialize();
     }
 }
@@ -126,7 +127,7 @@ pub struct ChainedPics {
 }
 
 impl ChainedPics {
-    pub const unsafe fn new(offset1: u8, offset2: u8) -> Self {
+    pub const unsafe fn new(_offset1: u8, _offset2: u8) -> Self {
         ChainedPics {
             master_command: Port::new(0x20),
             master_data: Port::new(0x21),

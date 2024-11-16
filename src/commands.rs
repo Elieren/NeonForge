@@ -1,5 +1,4 @@
 use crate::constants::{COLS, ROWS};
-use crate::delay;
 use crate::time::{get_time, set_time};
 use crate::vga::{clear_screen, write_char};
 use core::arch::asm;
@@ -187,7 +186,6 @@ pub fn command_fn(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
 
         for cmd in commands.iter() {
             let mut cmd_name_bytes = [0u8; 256];
-            let cmd_name_len = cmd.name.bytes().count();
             for (i, byte) in cmd.name.bytes().enumerate() {
                 cmd_name_bytes[i] = byte;
             }
