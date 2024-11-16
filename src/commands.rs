@@ -1,4 +1,5 @@
 use crate::constants::{COLS, ROWS};
+use crate::delay;
 use crate::time::{get_time, set_time};
 use crate::vga::{clear_screen, write_char};
 use core::arch::asm;
@@ -48,17 +49,18 @@ fn time_action(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
     }
 }
 
-fn time_add_action(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
+fn time_set_action(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
     unsafe {
-        let command: &[u8] = &(*buffer)[row][8..]; // Извлекаем аргументы после `time_add`
-        let mut parts = command.split(|&byte| byte == b':');
+        let command: &[u8] = &(*buffer)[row][12..20]; // Извлекаем аргументы после `time_add`
+
+        let command_str = core::str::from_utf8(command).unwrap_or("").trim();
+
+        let mut parts = command_str.split(':');
 
         if let (Some(h), Some(m), Some(s)) = (parts.next(), parts.next(), parts.next()) {
-            if let (Ok(hours), Ok(minutes), Ok(seconds)) = (
-                core::str::from_utf8(h).unwrap_or("").parse::<u8>(),
-                core::str::from_utf8(m).unwrap_or("").parse::<u8>(),
-                core::str::from_utf8(s).unwrap_or("").parse::<u8>(),
-            ) {
+            if let (Ok(hours), Ok(minutes), Ok(seconds)) =
+                (h.parse::<u8>(), m.parse::<u8>(), s.parse::<u8>())
+            {
                 set_time(hours, minutes, seconds);
                 let msg = b"Time set!";
                 for (i, &byte) in msg.iter().enumerate() {
@@ -155,20 +157,28 @@ pub fn command_fn(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
     unsafe {
         let command: &[u8] = &(*buffer)[row][3..];
 
-        let mut b = 0;
-        for i in command.iter() {
-            if *i != b'\0' {
-                b += 1;
+        // Найти конец команды, игнорируя аргументы
+        let (cmd, _) = match command.iter().position(|&byte| byte == b' ') {
+            Some(pos) => command.split_at(pos),
+            None => (command, &[][..]),
+        };
+
+        let comm = core::str::from_utf8(cmd).unwrap_or("").trim();
+
+        // Фильтруем только непустые и ненулевые байты
+        let mut comm_filtered: [u8; 256] = [0; 256];
+        let mut index = 0;
+        for &byte in comm.as_bytes().iter() {
+            if byte != 0 && !byte.is_ascii_whitespace() {
+                comm_filtered[index] = byte;
+                index += 1;
             }
         }
-
-        b += 3;
-        let comm: &[u8] = &(*buffer)[row][3..b];
 
         let commands: [Command; 7] = [
             Command::new("hello", hello_action),
             Command::new("time", time_action),
-            Command::new("time_add", time_add_action),
+            Command::new("time_set", time_set_action),
             Command::new("error", error_action),
             Command::new("reboot", reboot_action),
             Command::new("shutdown", shutdown_action),
@@ -176,7 +186,13 @@ pub fn command_fn(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
         ];
 
         for cmd in commands.iter() {
-            if comm.starts_with(cmd.name.as_bytes()) {
+            let mut cmd_name_bytes = [0u8; 256];
+            let cmd_name_len = cmd.name.bytes().count();
+            for (i, byte) in cmd.name.bytes().enumerate() {
+                cmd_name_bytes[i] = byte;
+            }
+
+            if comm_filtered == cmd_name_bytes {
                 let result = (cmd.action)(buffer, row);
                 if result {
                     return true;
@@ -189,3 +205,30 @@ pub fn command_fn(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
         false // Возвращаем false, если команда не найдена
     }
 }
+
+// fn number_to_ascii_bytes(number: usize) -> [u8; 20] {
+//     let mut buffer = [b'0'; 20];
+//     let mut i = 19;
+//     let mut n = number;
+
+//     if n == 0 {
+//         buffer[i] = b'0';
+//     } else {
+//         while n > 0 {
+//             buffer[i] = b'0' + (n % 10) as u8;
+//             n /= 10;
+//             i -= 1;
+//         }
+//     }
+
+//     // Сдвигаем байты влево, чтобы убрать лишние нули
+//     let shift = i + 1;
+//     let mut j = 0;
+//     while shift + j < 20 {
+//         buffer[j] = buffer[shift + j];
+//         j += 1;
+//     }
+//     buffer[j] = 0; // Завершающий нуль
+
+//     buffer
+// }
