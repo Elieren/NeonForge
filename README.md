@@ -1,7 +1,7 @@
 # my_kernel
 ![Rust](https://img.shields.io/badge/rust-1.84.0_nightly-orange.svg)
 
-![Loading](media\Timeline1.gif)
+![Loading](media/Timeline1.gif)
 
 ### About the project:
 The project is a simple operating system kernel implementation in the Rust programming language, focused on working with a VGA text interface.
