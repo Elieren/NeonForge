@@ -46,7 +46,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "my_os"
+name = "my_kernel"
 version = "0.1.0"
 dependencies = [
  "bootloader",

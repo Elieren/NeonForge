@@ -57,6 +57,16 @@ pub extern "C" fn _start() -> ! {
         vga::clear_screen(screen_width, screen_height);
         CURRENT_COL = print_prompt(CURRENT_ROW, CURRENT_COL);
 
+        CURSOR_POSITION_COL = CURRENT_COL;
+
+        // Отображение курсора на текущей позиции
+        let cursor_row = CURSOR_POSITION_ROW;
+        let cursor_col = CURSOR_POSITION_COL;
+        let vga_buffer = 0xb8000 as *mut u8;
+        *vga_buffer.offset((cursor_row as isize * COLS as isize + cursor_col as isize) * 2) = b'_';
+        *vga_buffer.offset((cursor_row as isize * COLS as isize + cursor_col as isize) * 2 + 1) =
+            0x07;
+
         loop {
             if let Some(key) = get_key() {
                 print_key(key, screen_width, screen_height);
