@@ -53,6 +53,8 @@ cargo install bootimage
 
 build kernel
 ```
+cd my_kernel
+
 cargo bootimage
 ```
 
