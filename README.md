@@ -39,6 +39,10 @@ rustup update nightly
 ```
 
 ```
+rustup component add llvm-tools-preview
+```
+
+```
 rustc --version
 ```
 

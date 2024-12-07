@@ -7,11 +7,14 @@ use x86_64::instructions::port::Port;
 mod commands;
 mod constants;
 mod eng;
+// mod file_system;
+mod gpio;
 mod time;
 mod vga;
 
 use crate::eng::SCANCODE_MAP;
 use constants::{COLS, CURRENT_COL, CURRENT_ROW, MAX_LINES, MSG, ROWS};
+use gpio::Gpio;
 use time::{enable_interrupts, init_idt, init_pit, set_time};
 
 static ASCII_LOGO: &[u8] = b"
@@ -43,16 +46,6 @@ pub extern "C" fn _start() -> ! {
             screen_height as usize - 1 - 8,
             screen_width as usize / 2 - 1,
         );
-
-        // delay(100000000);
-
-        loop {
-            if let Some(_) = get_key() {
-                break;
-            }
-        }
-
-        // delay(1000000);
 
         vga::clear_screen(screen_width, screen_height);
         CURRENT_COL = print_prompt(CURRENT_ROW, CURRENT_COL);
