@@ -1,7 +1,11 @@
-use crate::constants::{COLS, ROWS};
-use crate::time::{get_time, set_time};
+use crate::constants::{COLS, CURRENT_COL, CURRENT_ROW, ROWS};
+use crate::datetime::{get_date, get_time, set_date, set_time};
 use crate::vga::{clear_screen, write_char};
 use core::arch::asm;
+
+use alloc::format;
+use alloc::string::String;
+use alloc::vec::Vec;
 
 struct Command<'a> {
     name: &'a str,
@@ -28,19 +32,53 @@ fn hello_action(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
 fn time_action(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
     unsafe {
         let time = get_time();
-        let mut time_str = [0u8; 8];
+        let time_str = format!("{:02}:{:02}:{:02}", time.0, time.1, time.2);
 
-        // Заполняем строку времени
-        time_str[0] = b'0' + (time.hours / 10) % 10;
-        time_str[1] = b'0' + time.hours % 10;
-        time_str[2] = b':';
-        time_str[3] = b'0' + (time.minutes / 10) % 10;
-        time_str[4] = b'0' + time.minutes % 10;
-        time_str[5] = b':';
-        time_str[6] = b'0' + (time.seconds / 10) % 10;
-        time_str[7] = b'0' + time.seconds % 10;
+        for (i, byte) in time_str.bytes().enumerate() {
+            write_char(row + 1, i, byte, 0x07); // Печатает на строке row + 1
+            (*buffer)[row + 1][i] = byte; // Записываем в буфер
+        }
+        false
+    }
+}
 
-        for (i, &byte) in time_str.iter().enumerate() {
+fn date_action(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
+    unsafe {
+        let date = get_date();
+        let date_str = format!("{:02}.{:02}.{:04}", date.0, date.1, date.2);
+
+        for (i, byte) in date_str.bytes().enumerate() {
+            write_char(row + 1, i, byte, 0x07); // Печатает на строке row + 1
+            (*buffer)[row + 1][i] = byte; // Записываем в буфер
+        }
+        false
+    }
+}
+
+fn date_set_action(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
+    unsafe {
+        let command: &[u8] = &(*buffer)[row][12..22]; // Извлекаем аргументы после `time_add`
+
+        let command_str = core::str::from_utf8(command).unwrap_or("").trim();
+
+        let mut parts = command_str.split('.');
+
+        if let (Some(d), Some(m), Some(y)) = (parts.next(), parts.next(), parts.next()) {
+            if let (Ok(day), Ok(month), Ok(year)) =
+                (d.parse::<u8>(), m.parse::<u8>(), y.parse::<u16>())
+            {
+                set_date(day, month, year);
+                let msg = b"Date set!";
+                for (i, &byte) in msg.iter().enumerate() {
+                    write_char(row + 1, i, byte, 0x07); // Печатает на строке row + 1
+                    (*buffer)[row + 1][i] = byte; // Записываем в буфер
+                }
+                return false;
+            }
+        }
+
+        let msg = b"Invalid date format!";
+        for (i, &byte) in msg.iter().enumerate() {
             write_char(row + 1, i, byte, 0x07); // Печатает на строке row + 1
             (*buffer)[row + 1][i] = byte; // Записываем в буфер
         }
@@ -147,86 +185,53 @@ fn clear(buffer: *mut [[u8; COLS]; ROWS], _: usize) -> bool {
                 *cell = 0;
             }
         }
+        CURRENT_COL = 0;
+        CURRENT_ROW = 0;
     }
 
     true // Возвращаем true
 }
 
-pub fn command_fn(buffer: *mut [[u8; COLS]; ROWS], row: usize) -> bool {
-    unsafe {
-        let command: &[u8] = &(*buffer)[row][3..];
+pub fn command_fn(buffer: *mut [[u8; COLS]; ROWS], row: usize, command: &String) -> bool {
+    let (cmd, _) = match command.find(' ') {
+        Some(pos) => command.split_at(pos),
+        None => (command.as_str(), ""),
+    };
 
-        // Найти конец команды, игнорируя аргументы
-        let (cmd, _) = match command.iter().position(|&byte| byte == b' ') {
-            Some(pos) => command.split_at(pos),
-            None => (command, &[][..]),
-        };
+    let comm = cmd.trim();
 
-        let comm = core::str::from_utf8(cmd).unwrap_or("").trim();
-
-        // Фильтруем только непустые и ненулевые байты
-        let mut comm_filtered: [u8; 256] = [0; 256];
-        let mut index = 0;
-        for &byte in comm.as_bytes().iter() {
-            if byte != 0 && !byte.is_ascii_whitespace() {
-                comm_filtered[index] = byte;
-                index += 1;
-            }
+    // Фильтруем только непустые и ненулевые байты
+    let mut comm_filtered: Vec<u8> = Vec::new();
+    for &byte in comm.as_bytes().iter() {
+        if byte != 0 && !byte.is_ascii_whitespace() {
+            comm_filtered.push(byte);
         }
-
-        let commands: [Command; 7] = [
-            Command::new("hello", hello_action),
-            Command::new("time", time_action),
-            Command::new("time_set", time_set_action),
-            Command::new("error", error_action),
-            Command::new("reboot", reboot_action),
-            Command::new("shutdown", shutdown_action),
-            Command::new("clear", clear),
-        ];
-
-        for cmd in commands.iter() {
-            let mut cmd_name_bytes = [0u8; 256];
-            for (i, byte) in cmd.name.bytes().enumerate() {
-                cmd_name_bytes[i] = byte;
-            }
-
-            if comm_filtered == cmd_name_bytes {
-                let result = (cmd.action)(buffer, row);
-                if result {
-                    return true;
-                }
-                return false; // Завершите цикл, если команда найдена, но не вернула true
-            }
-        }
-
-        error_action(buffer, row);
-        false // Возвращаем false, если команда не найдена
     }
+
+    let commands: [Command; 9] = [
+        Command::new("hello", hello_action),
+        Command::new("time", time_action),
+        Command::new("time_set", time_set_action),
+        Command::new("date", date_action),
+        Command::new("date_set", date_set_action),
+        Command::new("error", error_action),
+        Command::new("reboot", reboot_action),
+        Command::new("shutdown", shutdown_action),
+        Command::new("clear", clear),
+    ];
+
+    for cmd in commands.iter() {
+        let cmd_name_bytes: Vec<u8> = cmd.name.bytes().collect();
+
+        if comm_filtered == cmd_name_bytes {
+            let result = (cmd.action)(buffer, row);
+            if result {
+                return true;
+            }
+            return false; // Завершите цикл, если команда найдена, но не вернула true
+        }
+    }
+
+    error_action(buffer, row);
+    false // Возвращаем false, если команда не найдена
 }
-
-// fn number_to_ascii_bytes(number: usize) -> [u8; 20] {
-//     let mut buffer = [b'0'; 20];
-//     let mut i = 19;
-//     let mut n = number;
-
-//     if n == 0 {
-//         buffer[i] = b'0';
-//     } else {
-//         while n > 0 {
-//             buffer[i] = b'0' + (n % 10) as u8;
-//             n /= 10;
-//             i -= 1;
-//         }
-//     }
-
-//     // Сдвигаем байты влево, чтобы убрать лишние нули
-//     let shift = i + 1;
-//     let mut j = 0;
-//     while shift + j < 20 {
-//         buffer[j] = buffer[shift + j];
-//         j += 1;
-//     }
-//     buffer[j] = 0; // Завершающий нуль
-
-//     buffer
-// }

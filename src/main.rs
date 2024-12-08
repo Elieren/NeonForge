@@ -1,21 +1,73 @@
 #![no_std]
 #![no_main]
 #![feature(abi_x86_interrupt)]
+#![feature(global_allocator)]
+#![feature(alloc_error_handler)]
+
+extern crate alloc;
+
+use alloc::format;
+use alloc::string::String;
+use alloc::vec;
+use alloc::vec::Vec;
 
 use core::panic::PanicInfo;
 use x86_64::instructions::port::Port;
 mod commands;
 mod constants;
+mod datetime;
 mod eng;
-// mod file_system;
+mod file_system;
 mod gpio;
-mod time;
+mod interrupts;
+mod pic;
+mod pit;
 mod vga;
 
+use core::mem::MaybeUninit;
+use linked_list_allocator::LockedHeap;
+
 use crate::eng::SCANCODE_MAP;
-use constants::{COLS, CURRENT_COL, CURRENT_ROW, MAX_LINES, MSG, ROWS};
+use constants::{
+    COLOR_INFO, COLS, CURRENT_COL, CURRENT_ROW, HEAP_SIZE, MAX_LINES, MSG, PARTITION_OFFSET, ROWS,
+};
+use datetime::{get_date, get_time};
+use interrupts::{enable_interrupts, init_idt};
+use pit::init_pit;
+
+use core::ptr::NonNull;
+use embedded_sdmmc::{Controller, Mode, VolumeIdx};
+use file_system::MyBlockDevice;
+
 use gpio::Gpio;
-use time::{enable_interrupts, init_idt, init_pit, set_time};
+use vga::{write_char, write_string};
+
+#[global_allocator]
+static ALLOCATOR: LockedHeap = LockedHeap::empty();
+
+fn init_heap() {
+    static mut HEAP_MEMORY: MaybeUninit<[u8; HEAP_SIZE]> = MaybeUninit::uninit();
+
+    unsafe {
+        let heap_start = HEAP_MEMORY.as_mut_ptr() as *mut u8;
+        ALLOCATOR.lock().init(heap_start, HEAP_SIZE);
+    }
+}
+
+struct MyTimeSource;
+
+impl embedded_sdmmc::TimeSource for MyTimeSource {
+    fn get_timestamp(&self) -> embedded_sdmmc::Timestamp {
+        embedded_sdmmc::Timestamp {
+            year_since_1970: 52,
+            zero_indexed_month: 0,
+            zero_indexed_day: 0,
+            hours: 0,
+            minutes: 0,
+            seconds: 0,
+        }
+    }
+}
 
 static ASCII_LOGO: &[u8] = b"
     ____  ____  _____
@@ -28,14 +80,66 @@ static ASCII_LOGO: &[u8] = b"
 static mut BUFFER: [[u8; COLS]; ROWS] = [[0; COLS]; ROWS];
 static mut CURSOR_POSITION_ROW: usize = 0;
 static mut CURSOR_POSITION_COL: usize = 0;
+static mut INPUT_BUFFER: String = String::new();
 
 #[no_mangle]
 pub extern "C" fn _start() -> ! {
+    write_string(0, 0, "Initializing heap...", 0x0F);
+    init_heap();
+    write_string(1, 0, "Heap initialized.", 0x0F);
+
     init_idt();
     init_pit();
     enable_interrupts();
 
-    set_time(12, 0, 0); // Установка начального времени
+    // Инициализация блокового устройства
+    write_string(2, 0, "Initializing block device...", 0x0F);
+    let base_address = NonNull::new((0x100000 + PARTITION_OFFSET) as *mut u8).unwrap();
+    let size = 5 * 1024 * 1024 * 1024; // Размер диска 5 ГБ
+    let block_device = MyBlockDevice::new(base_address, size);
+    write_string(3, 0, "Block device initialized.", 0x0F);
+
+    write_string(4, 0, "Initializing FAT controller...", 0x0F);
+    let mut controller = Controller::new(block_device, MyTimeSource);
+    write_string(5, 0, "FAT controller initialized.", 0x0F);
+
+    write_string(6, 0, "Mounting volume...", 0x0F);
+    match controller.get_volume(VolumeIdx(0)) {
+        Ok(mut volume) => {
+            write_string(7, 0, "Volume mounted.", 0x0F);
+            let root_dir = controller.open_root_dir(&volume).unwrap();
+
+            write_string(8, 0, "Writing data to file...", 0x0F);
+            let data = b"Hello, world!";
+            let mut file = controller
+                .open_file_in_dir(&mut volume, &root_dir, "example.txt", Mode::ReadWriteCreate)
+                .unwrap();
+            controller.write(&mut volume, &mut file, data).unwrap();
+            controller.close_file(&volume, file).unwrap();
+            write_string(9, 0, "Data written to file.", 0x0F);
+
+            write_string(10, 0, "Reading data from file...", 0x0F);
+            let mut read_file = controller
+                .open_file_in_dir(&mut volume, &root_dir, "example.txt", Mode::ReadOnly)
+                .unwrap();
+            let mut buffer = [0u8; 13];
+            controller
+                .read(&volume, &mut read_file, &mut buffer)
+                .unwrap();
+            controller.close_file(&volume, read_file).unwrap();
+            write_string(11, 0, "Data read from file.", 0x0F);
+
+            let content_str = core::str::from_utf8(&buffer).unwrap();
+            write_string(12, 0, "File content: ", 0x0F);
+            write_string(13, 0, content_str, 0x0F);
+        }
+        Err(e) => {
+            write_string(7, 0, "Failed to mount volume.", 0x4F);
+            write_string(8, 0, &format!("Error: {:?}", e), 0x4F);
+        }
+    }
+
+    delay(100000000);
 
     unsafe {
         let screen_width = 80;
@@ -61,6 +165,9 @@ pub extern "C" fn _start() -> ! {
             0x07;
 
         loop {
+            scroll_status();
+            date_status();
+            time_status();
             if let Some(key) = get_key() {
                 print_key(key, screen_width, screen_height);
             }
@@ -70,6 +177,11 @@ pub extern "C" fn _start() -> ! {
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
+    loop {}
+}
+
+#[alloc_error_handler]
+fn alloc_error_handler(_layout: core::alloc::Layout) -> ! {
     loop {}
 }
 
@@ -158,9 +270,11 @@ fn get_key() -> Option<u8> {
 
     static mut LAST_SCANCODE: u8 = 0;
     unsafe {
-        if scancode != LAST_SCANCODE {
+        if scancode == 0x0E {
+            delay(200000);
+            Some(scancode)
+        } else if scancode != LAST_SCANCODE {
             LAST_SCANCODE = scancode;
-            delay(100000);
             Some(scancode)
         } else {
             None
@@ -176,18 +290,25 @@ fn print_key(key: u8, width: u16, height: u16) {
                 BUFFER[CURRENT_ROW][CURRENT_COL] = 0;
                 CURRENT_COL -= 1;
                 BUFFER[CURRENT_ROW][CURRENT_COL] = 0;
+                INPUT_BUFFER.pop();
             }
         } else if let Some(character) = SCANCODE_MAP[key as usize] {
             if character == '\n' {
                 // Выполнение команды и отображение текущей строки
-                let stat: bool = commands::command_fn(&raw mut BUFFER, CURRENT_ROW);
+                let stat: bool = commands::command_fn(&raw mut BUFFER, CURRENT_ROW, &INPUT_BUFFER);
                 if !stat {
                     CURRENT_ROW += 2;
-                } else {
-                    CURRENT_ROW = 0;
                 }
-                CURRENT_COL = 0;
 
+                // Очистка буфера после выполнения команды
+                INPUT_BUFFER.clear();
+
+                CURRENT_COL = 0;
+                if CURRENT_ROW >= 24 {
+                    scroll();
+                    CURRENT_ROW -= 1;
+                    CURRENT_COL = 0;
+                }
                 // Печать приглашения
                 CURRENT_COL = print_prompt(CURRENT_ROW, CURRENT_COL);
             } else {
@@ -197,6 +318,7 @@ fn print_key(key: u8, width: u16, height: u16) {
                         CURRENT_ROW += 1;
                     }
                     BUFFER[CURRENT_ROW][CURRENT_COL] = character as u8;
+                    INPUT_BUFFER.push(character);
                     CURRENT_COL += 1;
                 }
             }
@@ -219,5 +341,43 @@ fn print_key(key: u8, width: u16, height: u16) {
         *vga_buffer.offset((cursor_row as isize * width as isize + cursor_col as isize) * 2) = b'_';
         *vga_buffer.offset((cursor_row as isize * width as isize + cursor_col as isize) * 2 + 1) =
             0x07;
+    }
+}
+
+fn scroll() {
+    unsafe {
+        for i in 0..24 {
+            BUFFER[i] = BUFFER[i + 1];
+        }
+        BUFFER[24] = [0; COLS];
+    }
+}
+
+fn scroll_status() {
+    unsafe {
+        if CURRENT_ROW == 24 {
+            scroll();
+            CURRENT_ROW -= 1;
+            CURRENT_COL = 0;
+            CURRENT_COL = print_prompt(CURRENT_ROW, CURRENT_COL);
+        }
+    }
+}
+
+fn time_status() {
+    let time = get_time();
+    let time_str = format!("{:02}:{:02}", time.0, time.1);
+
+    for (i, byte) in time_str.bytes().enumerate() {
+        write_char(24, i + 74, byte, COLOR_INFO); // Печатает на строке row + 1
+    }
+}
+
+fn date_status() {
+    let date = get_date();
+    let date_str = format!("{:02}.{:02}.{:04}", date.0, date.1, date.2);
+
+    for (i, byte) in date_str.bytes().enumerate() {
+        write_char(24, i + 62, byte, COLOR_INFO); // Печатает на строке row + 1
     }
 }
