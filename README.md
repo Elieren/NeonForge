@@ -21,7 +21,7 @@ new:
 ## Kernel capabilities
 * Added heap support (alloc).
 * Added GPIO support for RPI4.
-* Added bar panel
+* Added bar panel.
 
 ## Installation
 
