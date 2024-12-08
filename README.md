@@ -113,9 +113,9 @@ qemu-system-x86_64 -drive format=raw,file=disk.img
 
 It is also possible to write it to a USB stick and boot it on a real machine, but be careful to choose the correct device name, because everything on that device is overwritten:
 
-'''
+```
 dd if=target/x86_64-blog_os/debug/bootimage-blog_os.bin of=/dev/sdX && sync
-'''
+```
 
 Where sdX is the device name of your USB stick.
 
