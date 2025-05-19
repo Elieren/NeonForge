@@ -40,9 +40,9 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 install nightly rust
 ```
-rustup install nightly
+rustup toolchain install nightly-2024-11-08
 
-rustup default nightly
+rustup default nightly-2024-11-08
 
 rustup update nightly
 ```
