@@ -17,7 +17,7 @@ mod commands;
 mod constants;
 mod datetime;
 mod eng;
-mod file_system;
+// mod file_system;
 mod gpio;
 mod interrupts;
 mod pic;
@@ -37,7 +37,7 @@ use pit::init_pit;
 
 use core::ptr::NonNull;
 use embedded_sdmmc::{Controller, Mode, VolumeIdx};
-use file_system::MyBlockDevice;
+// use file_system::MyBlockDevice;
 
 use gpio::Gpio;
 use vga::{write_char, write_string};
@@ -69,13 +69,14 @@ impl embedded_sdmmc::TimeSource for MyTimeSource {
     }
 }
 
-static ASCII_LOGO: &[u8] = b"
-    ____  ____  _____
-   / __ \\/ __ \\/ ___/
-  / / / / / / /\\__ \\ 
- / /_/ / /_/ /___/ / 
-/_____\\/____//____/
-";
+static ASCII_LOGO: &[u8] = br#"
+                                         
+ _____             _____                 
+|   | |___ ___ ___|   __|___ ___ ___ ___ 
+| | | | -_| . |   |   __| . |  _| . | -_|
+|_|___|___|___|_|_|__|  |___|_| |_  |___|
+                                |___|    
+"#;
 
 static mut BUFFER: [[u8; COLS]; ROWS] = [[0; COLS]; ROWS];
 static mut CURSOR_POSITION_ROW: usize = 0;
@@ -93,53 +94,53 @@ pub extern "C" fn _start() -> ! {
     enable_interrupts();
 
     // Инициализация блокового устройства
-    write_string(2, 0, "Initializing block device...", 0x0F);
-    let base_address = NonNull::new((0x100000 + PARTITION_OFFSET) as *mut u8).unwrap();
-    let size = 5 * 1024 * 1024 * 1024; // Размер диска 5 ГБ
-    let block_device = MyBlockDevice::new(base_address, size);
-    write_string(3, 0, "Block device initialized.", 0x0F);
+    // write_string(2, 0, "Initializing block device...", 0x0F);
+    // let base_address = NonNull::new((0x100000 + PARTITION_OFFSET) as *mut u8).unwrap();
+    // let size = 5 * 1024 * 1024 * 1024; // Размер диска 5 ГБ
+    // let block_device = MyBlockDevice::new(base_address, size);
+    // write_string(3, 0, "Block device initialized.", 0x0F);
 
-    write_string(4, 0, "Initializing FAT controller...", 0x0F);
-    let mut controller = Controller::new(block_device, MyTimeSource);
-    write_string(5, 0, "FAT controller initialized.", 0x0F);
+    // write_string(4, 0, "Initializing FAT controller...", 0x0F);
+    // let mut controller = Controller::new(block_device, MyTimeSource);
+    // write_string(5, 0, "FAT controller initialized.", 0x0F);
 
-    write_string(6, 0, "Mounting volume...", 0x0F);
-    match controller.get_volume(VolumeIdx(0)) {
-        Ok(mut volume) => {
-            write_string(7, 0, "Volume mounted.", 0x0F);
-            let root_dir = controller.open_root_dir(&volume).unwrap();
+    // write_string(6, 0, "Mounting volume...", 0x0F);
+    // match controller.get_volume(VolumeIdx(0)) {
+    //     Ok(mut volume) => {
+    //         write_string(7, 0, "Volume mounted.", 0x0F);
+    //         let root_dir = controller.open_root_dir(&volume).unwrap();
 
-            write_string(8, 0, "Writing data to file...", 0x0F);
-            let data = b"Hello, world!";
-            let mut file = controller
-                .open_file_in_dir(&mut volume, &root_dir, "example.txt", Mode::ReadWriteCreate)
-                .unwrap();
-            controller.write(&mut volume, &mut file, data).unwrap();
-            controller.close_file(&volume, file).unwrap();
-            write_string(9, 0, "Data written to file.", 0x0F);
+    //         write_string(8, 0, "Writing data to file...", 0x0F);
+    //         let data = b"Hello, world!";
+    //         let mut file = controller
+    //             .open_file_in_dir(&mut volume, &root_dir, "example.txt", Mode::ReadWriteCreate)
+    //             .unwrap();
+    //         controller.write(&mut volume, &mut file, data).unwrap();
+    //         controller.close_file(&volume, file).unwrap();
+    //         write_string(9, 0, "Data written to file.", 0x0F);
 
-            write_string(10, 0, "Reading data from file...", 0x0F);
-            let mut read_file = controller
-                .open_file_in_dir(&mut volume, &root_dir, "example.txt", Mode::ReadOnly)
-                .unwrap();
-            let mut buffer = [0u8; 13];
-            controller
-                .read(&volume, &mut read_file, &mut buffer)
-                .unwrap();
-            controller.close_file(&volume, read_file).unwrap();
-            write_string(11, 0, "Data read from file.", 0x0F);
+    //         write_string(10, 0, "Reading data from file...", 0x0F);
+    //         let mut read_file = controller
+    //             .open_file_in_dir(&mut volume, &root_dir, "example.txt", Mode::ReadOnly)
+    //             .unwrap();
+    //         let mut buffer = [0u8; 13];
+    //         controller
+    //             .read(&volume, &mut read_file, &mut buffer)
+    //             .unwrap();
+    //         controller.close_file(&volume, read_file).unwrap();
+    //         write_string(11, 0, "Data read from file.", 0x0F);
 
-            let content_str = core::str::from_utf8(&buffer).unwrap();
-            write_string(12, 0, "File content: ", 0x0F);
-            write_string(13, 0, content_str, 0x0F);
-        }
-        Err(e) => {
-            write_string(7, 0, "Failed to mount volume.", 0x4F);
-            write_string(8, 0, &format!("Error: {:?}", e), 0x4F);
-        }
-    }
+    //         let content_str = core::str::from_utf8(&buffer).unwrap();
+    //         write_string(12, 0, "File content: ", 0x0F);
+    //         write_string(13, 0, content_str, 0x0F);
+    //     }
+    //     Err(e) => {
+    //         write_string(7, 0, "Failed to mount volume.", 0x4F);
+    //         write_string(8, 0, &format!("Error: {:?}", e), 0x4F);
+    //     }
+    // }
 
-    delay(100000000);
+    // delay(100000000);
 
     unsafe {
         let screen_width = 80;
