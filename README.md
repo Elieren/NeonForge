@@ -1,4 +1,4 @@
-# my_kernel
+# NeonForge
 ![Rust](https://img.shields.io/badge/rust-1.84.0_nightly-orange.svg)
 
 ![Loading](media/Timeline1.gif)
